@@ -37,6 +37,9 @@ print("Version: ", tf.__version__)
 print("Eager mode: ", tf.executing_eagerly())
 print("GPU is", "available" if tf.config.list_physical_devices('GPU') else "NOT AVAILABLE")
 
+import warnings
+warnings.filterwarnings("ignore")
+
 class A:
     
 # Step1: Data Pre-processing    
@@ -49,7 +52,7 @@ class A:
         '''
         Read data from given address
         '''
-        data_path=os.path.join(Path,'Datasets/A/twitter-2016train-A.txt')
+        data_path=os.path.join(Path,address)
         data = pd.read_table(data_path,sep='\t',header=None)
         
         return data
@@ -117,7 +120,7 @@ class A:
         print("Unique words: {}".format(len(counts)))
 
         Most_common= counts.most_common()[:30]
-        print("Top 30 most common words: {}".format(Most_common))
+        print("Top 30 most common words: {}\n".format(Most_common))
 
         vocab = {word: num for num, word in enumerate(counts, 1)}
         id2vocab = {v: k for k, v in vocab.items()}
@@ -127,7 +130,7 @@ class A:
     def word2vec(self,token,window,min_count,epochs):
         word2vec_model=Word2Vec(token,window=window, min_count=min_count,workers = multiprocessing.cpu_count())
         word2vec_model.train(token, total_examples = len(token), epochs = epochs)
-        print('This is summary of Word2Vec: {}'.format(word2vec_model))
+        print('This is summary of Word2Vec: {}\n'.format(word2vec_model))
         
         index=word2vec_model.wv.key_to_index
         word2vec_model.wv.save_word2vec_format('./A/Word2Vec.vector')
@@ -160,12 +163,25 @@ class A:
         return X_tmp
     
     def split(self,Text,vocab,label,seq_len,embed_dict):
-        
-        X=self.tokenizer_lstm(Text, vocab, seq_len,embed_dict)
-        
+        X = self.tokenizer_lstm(Text, vocab, seq_len,embed_dict)
         Y = tf.one_hot(label, depth=3)
-        Y= np.array(Y)
+        Y = np.array(Y)
         X_train, X_test, Y_train, Y_test = train_test_split (X, Y, test_size=0.1, random_state=1000) 
+        
+        # sentiment distribution of train set
+        train_dis={}
+        train_dis['negative - 0']=np.sum(Y_train[:,0]==1)
+        train_dis['neutral - 1']=np.sum(Y_train[:,1]==1)
+        train_dis['positive - 2']=np.sum(Y_train[:,2]==1)
+        
+        # sentiment distribution of test set
+        test_dis={}
+        test_dis['negative - 0']=np.sum(Y_test[:,0]==1)
+        test_dis['neutral - 1']=np.sum(Y_test[:,1]==1)
+        test_dis['positive - 2']=np.sum(Y_test[:,2]==1)
+        
+        print('Train label Distribution:',train_dis,'\n')
+        print('Test label Distribution:',test_dis,'\n')
         
         return X_train, X_test, Y_train, Y_test
     
@@ -175,7 +191,7 @@ class A:
         dataA.columns = ['ID','Sentiment','Text','Nan']
         dataA['label'] = dataA.Sentiment.apply(self.add_label)
         distrib=self.label_distrib(dataA)
-        print(distrib)
+        print('label Distribution for SubtaskA:',distrib,'\n')
         token,vocab=self.Tokenize(dataA.Text)
         
         embed_dict=self.word2vec(token,window,min_count,epochs)
@@ -257,11 +273,18 @@ class A:
         train_pre = history.history['precision'][-1]
         val_pre = history.history['val_precision'][-1]
         
-        return train_acc,val_acc,history      
+        return history      
     
     def sketch_model():
+        class_names = ['0: Negative','1: Neutra;', '2: Positive']
         return
     
 # Step5: prediction and evaluation
-    def pred_eval():
-        return
+    def pred_eval(self, model,X_test, Y_test):
+        class_names = ['0: Negative','1: Neutra;', '2: Positive']
+        class_names = ['0: Negative','1: Positive']
+        Y_pred = model.predict(X_test)
+        Metrics = model.evaluate(X_test, Y_test, return_dict=True)
+        print('Predict Metrcs for subtaskA:',Metrics,'\n')
+        
+        return Metrics
