@@ -1,37 +1,24 @@
 import os
-import re
-import shutil
-from tqdm import tqdm
-
 import numpy  as np
 import pandas as pd
-import joblib
-import nltk
 import ekphrasis
 from collections import Counter
 
 from gensim.models import Word2Vec, KeyedVectors
-from nltk import word_tokenize
 import multiprocessing
 
 import keras
 import tensorflow as tf
-from tensorflow.keras.layers import Embedding
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, LSTM, SpatialDropout1D, Bidirectional
+from tensorflow.keras.layers import Dense, LSTM, SpatialDropout1D, Bidirectional, Embedding
 
-from tensorflow.keras.preprocessing.text import Tokenizer
-from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.models import load_model
 
-from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
+from sklearn.metrics import confusion_matrix, accuracy_score, precision_score, recall_score, f1_score, classification_report
 from sklearn.model_selection import train_test_split
-
-
+from sklearn.utils import shuffle
 import seaborn as sns
 import matplotlib.pyplot as plt
-from IPython import display
-import tensorflow_hub as hub
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -46,7 +33,9 @@ class B:
         return Path
     def read_data(self,Path,address):
         '''
-        Read data from given address
+        param: Path: path of the filefolder
+        param: address: figure address
+        return: data from given address
         '''
         data_path=os.path.join(Path,address)
         data = pd.read_table(data_path,sep='\t',header=None)
@@ -55,22 +44,37 @@ class B:
         
 
     def add_label(self,sentiment):
+        '''
+        param: sentiment:text labels
+        return: figure labels
+        ''' 
         if sentiment == 'negative':
             return 0
         elif sentiment == 'positive':
             return 1
     
     def label_distrib(self,dataB):
+        '''
+        param: dataB
+        return distrib distribution of labels
+        '''
         distrib=dataB.loc[:,['Sentiment','label']].value_counts().to_dict()
         
         return distrib
  
     def topic_counts(self,dataB):
+        '''
+        param: dataB
+        return total categories of topic
+        '''
         topic_counts=Counter(dataB.Topic)
         
         return len(topic_counts)
     
     def add_topic(self,topic,text):
+        '''
+        combine topic with text
+        '''
         New_text=[]
         for i in range(len(text)):
             New_text.append(topic[i]+' '+text[i])
@@ -113,6 +117,11 @@ class B:
     )
     
     def Tokenize(self,Texts):
+        '''
+        param: Texts: sentences raw data
+        return: token: tokenized words
+        return: vocab: vocabulary of word--words to id
+        '''
         token=[]
         for Text in Texts:
             words = [sentence for sentence in self.text_processor.pre_process_doc(Text) if (sentence!='s' and sentence!='\'')]
@@ -133,6 +142,14 @@ class B:
     
 # Step2: Word2Vec Pretraining    
     def word2vec(self,token,window,min_count,epochs):
+        '''
+        param: token: words be tokenized from sentences.
+        param: window: context length
+        param: min_count: times a word appear to be consider
+        param: epochs: times of iteration
+        return: embed_dict: embeded dictionary
+        '''
+
         word2vec_model=Word2Vec(token,window=window, min_count=min_count,workers = multiprocessing.cpu_count())
         word2vec_model.train(token, total_examples = len(token), epochs = epochs)
         print('This is summary of Word2Vec: {}\n'.format(word2vec_model))
@@ -152,27 +169,39 @@ class B:
         return embed_dict
     
 # Step3: split train and test sets
-    def tokenizer_lstm(self,X, vocab, seq_len,embed_dict):
+    def tokenizer_lstm(self,X, vocab, maxlen,embed_dict):
         '''
-        Returns tokenized tensor with left padding
+        param: vocab:vocabulary of words
+        param: maxlen: The maximum words of a sentences contained
+        param: embed_dict: embeded dictionary
+        Return: tokenized tensor with left padding
         '''
-        X_tmp = np.zeros((len(X), seq_len), dtype=np.int64)
+        X_tmp = np.zeros((len(X), maxlen), dtype=np.int64)
         for i, text in enumerate(X):
             tokens = [word for word in self.text_processor.pre_process_doc(text) if (word!='s' and word!='\'')]
     #         tokens = [word for word in tokens if (word not in stop)]
             token_ids = [vocab[word] for word in tokens if word in embed_dict.keys()]###
-            end_idx = min(len(token_ids), seq_len)
-            start_idx = max(seq_len - len(token_ids), 0)
+            end_idx = min(len(token_ids), maxlen)
+            start_idx = max(maxlen - len(token_ids), 0)
             X_tmp[i,start_idx:] = token_ids[:end_idx]
 
         return X_tmp
     
-    def split(self,Text,vocab,label,seq_len,embed_dict):
-        
-        X = self.tokenizer_lstm(Text, vocab, seq_len,embed_dict)
+    def split(self,Text,vocab,label,test_size,maxlen,embed_dict):
+        '''
+        param: Text: the sentences raw data
+        param: vocab:vocabulary of words
+        param: label the figure labels
+        param: test_size:proportion to split test set
+        param: maxlen: The maximum words of a sentences contained
+        param:embed_dict: embeded dictionary
+        return: train set and text set Y in one-hot form.
+        '''
+        X = self.tokenizer_lstm(Text, vocab, maxlen,embed_dict)
         Y = tf.one_hot(label, depth=2)
         Y = np.array(Y)
-        X_train, X_test, Y_train, Y_test = train_test_split (X, Y, test_size=0.1, random_state=1000) 
+        X, Y = shuffle(X,Y)
+        X_train, X_test, Y_train, Y_test = train_test_split (X, Y, test_size=test_size, random_state=0) 
         
         # sentiment distribution of train set
         train_dis={}
@@ -190,7 +219,18 @@ class B:
         return X_train, X_test, Y_train, Y_test      
         
     
-    def Final_PreProcess(self,address,window,min_count,epochs,seq_len):    
+    def Final_PreProcess(self,address,window,min_count,epochs,maxlen,test_size):  
+        '''
+        param: address: figure address
+        param: window: context length
+        param: min_count: times a word appear to be consider
+        param: epochs: times of iteration
+        param: test_size:proportion to split test set
+        param: maxlen: The maximum words of a sentences contained
+        return: train set and text set Y in one-hot form. 
+        return: vocab:vocabulary of words
+        return: embed_dict: embeded dictionary
+        '''
         PathB=self.folderdir()
         dataB=self.read_data(PathB,address)
         dataB.columns = ['ID','Topic','Sentiment','Text','label']
@@ -205,18 +245,18 @@ class B:
         token,vocab=self.Tokenize(dataB.Text_Topic)
         
         embed_dict=self.word2vec(token,window,min_count,epochs)
-        X_train, X_test, Y_train, Y_test=self.split(dataB.Text_Topic,vocab,dataB.label,seq_len,embed_dict)
+        X_train, X_test, Y_train, Y_test=self.split(dataB.Text_Topic,vocab,dataB.label,test_size,maxlen,embed_dict)
         return X_train, X_test, Y_train, Y_test,vocab,embed_dict
         
 
 # Step4: Training
         
-    def build_embedding_layer(self, vocab, embed_dict):
+    def build_embedding_layer(self, vocab, embed_dict,maxlen):
         """
         Build embedding matrix and embedding layer
-        :param vocab_size: vocabulary size
-        :param tok: tokenizer
-        :param embeddings_index: embedding index
+        :param vocab: word2vec vocabulary
+        :param embed_dict: embedded dictionary
+        :param maxlen: The maximum words of a sentences contained
         :return: embedding matrix and embedding layer
         """
         #Build embedding matrix
@@ -231,28 +271,26 @@ class B:
                 embedding_matrix[i] = embedding_vector
 
         # Build embedding layer
-        embedding_layer = Embedding(input_dim = vocab_size, output_dim = 100, weights = [embedding_matrix], input_length = 100, trainable=False)
+        embedding_layer = Embedding(input_dim = vocab_size, output_dim = 100, weights = [embedding_matrix], input_length = maxlen, trainable=False)
 
         return embedding_layer
 
-    def model_build(self,vocab,embed_dict):
+    def model_build(self,vocab,embed_dict,maxlen):
         """
-        Train, validate and test BiLSTM model, calculate accuracy of training and validation set
-        :param X_train: tweet train data
-        :param y_train: sentiment label train data
-        :param embedding_layer: embedding layer
-        :param X_test: tweet test data
-        :param y_test: sentiment label test data
-        :return: accuracy, recall, precision, F1 score and history
+        Bulid BiLSTM model.
+        param vocab: word2vec vocabulary
+        param embed_dict: embedded dictionary
+        param maxlen: The maximum words of a sentences contained
+        return；model
         """
         tf.debugging.set_log_device_placement(True)
         model = Sequential()
-        embedding_layer=self.build_embedding_layer(vocab,embed_dict)
+        embedding_layer=self.build_embedding_layer(vocab,embed_dict,maxlen)
         model.add(embedding_layer)
         model.add(SpatialDropout1D(0.2))
         
-        model.add(Bidirectional(LSTM(128,dropout = 0.5,return_sequences=True)))
-        model.add(Bidirectional(LSTM(64,dropout = 0.5)))  #2 loss: 0.6735 - accuracy: 0.7028 - val_loss: 0.7640 - val_accuracy: 0.6669
+        #model.add(Bidirectional(LSTM(128,dropout = 0.5,return_sequences=True)))
+        model.add(Bidirectional(LSTM(64,dropout = 0.4))) 
 
 
     
@@ -261,37 +299,117 @@ class B:
         return model
     
     def model_train(self,X_train, y_train,model,validation_split,batch_size,epochs,epochOfModel):
-        
+        '''
+        Train BiLSTM model
+        param: X_train: text train data
+        param: y_train: sentiment label train data
+        param: model
+        param: validation_split: proportion to split valid set
+        param: batch_size: the amount of data to train together
+        param: epochs: times of iteration
+        param: epochOfModel: choose which epoch of model to save
+        return；model
+        '''
         model.compile(optimizer='adam', loss='categorical_crossentropy', 
-                      metrics = ['Recall','Accuracy','Precision'])
+                      metrics = ['Accuracy',tf.keras.metrics.AUC(from_logits=True,name='auc')])
         
         history = model.fit(X_train, y_train, validation_split=validation_split, epochs = epochs, batch_size = batch_size )
         
         model.save('./B/taskB.h5'.format(epochOfModel))
         
-        train_acc = history.history['Accuracy'][-1]
-        val_acc = history.history['val_Accuracy'][-1]
+        train_acc = history.history['Accuracy'][epochOfModel]
+        val_acc = history.history['val_Accuracy'][epochOfModel]
         
-        train_rec = history.history['recall'][-1]
-        val_rec = history.history['val_recall'][-1]
+        train_los = history.history['loss'][epochOfModel]
+        val_los = history.history['val_loss'][epochOfModel]
         
-        train_pre = history.history['precision'][-1]
-        val_pre = history.history['val_precision'][-1]
-        
-        return history      
-    
-    def sketch_model():
-    
-        class_names = ['0: Negative','1: Positive']
-        
-        return
+        train_auc = history.history['auc'][epochOfModel]
+        val_auc = history.history['val_auc'][epochOfModel]       
+        return train_acc, val_acc,train_los,val_los, history         
     
 # Step5: prediction and evaluation
     def pred_eval(self, model,X_test, Y_test):
-        class_names = ['0: Negative','1: Neutra;', '2: Positive']
-        class_names = ['0: Negative','1: Positive']
+        '''
+        Test BiLSTM model, calculate accuracy of test set
+        param: model
+        param: X_test: text test data
+        param: y_test: sentiment label test data
+        return；model
+        return: Y_pred,Metric,Confusion_Matrix,report
+        '''
+        Metric=pd.DataFrame(index=['Y_Predict'])
         Y_pred = model.predict(X_test)
-        Metrics = model.evaluate(X_test, Y_test, return_dict=True)
-        print('Predict Metrcs for subtaskB:',Metrics,'\n')
+        y_test = np.argmax(Y_test, axis = 1)
+        y_pred = np.argmax(Y_pred, axis = 1)
+        Metric['Recall'] = recall_score(y_test, y_pred)
+        Metric['Accuracy'] = accuracy_score(y_test, y_pred)
+        Metric['precision'] = precision_score(y_test, y_pred)
+        Metric['F1_Score'] = f1_score(y_test, y_pred)
+        Confusion_Matrix=confusion_matrix(y_test, y_pred)
+        report=classification_report(y_test,y_pred, target_names=['negative:0','positive:1'])
         
-        return Metrics
+        return Y_pred,Metric,Confusion_Matrix,report
+        
+    def Accuracy(self,train_acc, val_acc,Metrics,which):
+        '''
+        tidy accuracy
+        '''
+        Accuracy=[train_acc, val_acc,Metrics.loc['Y_Predict','Accuracy']]
+        Accuracy=pd.DataFrame(Accuracy).T
+        Accuracy.columns=['Training','Validation','Test']
+        Accuracy.index=['Accuracy of '+which]
+        return Accuracy    
+        
+    def sketch_model(self,history,Confusion_Matrix):
+        '''
+        draw the lineplot and heatmap
+        '''
+        Train_acc=history.history['Accuracy']
+        Valid_acc=history.history['val_Accuracy']
+
+        Train_los=history.history['loss']
+        Valid_los=history.history['val_loss']
+        
+        Train_auc=history.history['auc']
+        Valid_auc=history.history['val_auc']
+        df=pd.DataFrame([Train_acc,Valid_acc,Train_los,Valid_los,Train_auc,Valid_auc],columns=range(1,51),
+                index=['Train_acc','Valid_acc','Train_los','Valid_los','Train_auc','Valid_auc']).T
+
+
+        sns.set_theme(style="whitegrid")
+        '''
+        Train_acc    Valid_acc 
+        Train_rec    Valid_rec
+        Train_pre    Valid_pre
+        Train_los    Valid_los
+        '''
+        Acc=sns.lineplot(data=df[['Train_acc','Valid_acc']], palette="tab10", linewidth=2.5)
+        Acc.set(xlabel = 'Epochs', ylabel = 'Accuracy')
+        fig = Acc.get_figure()
+        fig.savefig("./Figure/B/Accuracy.png")
+        plt.close()
+        los=sns.lineplot(data=df[['Train_los','Valid_los']], palette="tab10", linewidth=2.5)
+        los.set(xlabel = 'Epochs', ylabel = 'Loss')
+        fig = los.get_figure()
+        fig.savefig("./Figure/B/loss.png")
+        plt.close()
+        
+        auc=sns.lineplot(data=df[['Train_auc','Valid_auc']], palette="tab10", linewidth=2.5)
+        auc.set(xlabel = 'Epochs', ylabel = 'ROC')
+        fig = auc.get_figure()
+        fig.savefig("./Figure/B/ROC.png")
+        plt.close()          
+        
+        lea=sns.lineplot(data=df[['Train_acc','Valid_acc','Train_los','Valid_los']], palette="tab10", linewidth=2.5)
+        lea.set(xlabel = 'Epochs', ylabel = 'Learning')
+        fig = lea.get_figure()
+        fig.savefig("./Figure/B/learning.png")
+        plt.close() 
+        CM=sns.heatmap(Confusion_Matrix, annot=True,center=True, cmap="mako",xticklabels=['negative','positive'],yticklabels=['negative','positive'])
+        CM.set_xlabel('Predict')
+        CM.set_ylabel('True')
+        fig = CM.get_figure()
+        fig.savefig("./Figure/B/Confusion_Matrix.png")
+        plt.close()
+        del fig
+        return 

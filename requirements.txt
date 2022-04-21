@@ -1,13 +1,9 @@
-numpy 
-pandas
-nltk
-joblib
+numpy==1.21.5
+pandas==1.4.2
 keras==2.6.0
 tensorflow==2.6.0
 ekphrasis==0.5.1
 scikit-learn==1.0.2
 gensim==4.1.2
-seaborn
-tf-models-official==2.6.0 
-tensorflow-text==2.6.0 
-transformers
+seaborn==0.11.2
+matplotlib==3.5.1
